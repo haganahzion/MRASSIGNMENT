@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<title>The Old Man and the Sea</title>
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#000}
+@keyframes rowL{0%,100%{transform:rotate(-20deg)}50%{transform:rotate(20deg)}}
+@keyframes rowR{0%,100%{transform:rotate(20deg)}50%{transform:rotate(-20deg)}}
+@keyframes flicker{0%,100%{opacity:1}45%{opacity:.82}55%{opacity:.95}70%{opacity:.88}}
+@keyframes starTwinkle{0%,100%{opacity:.4}50%{opacity:.9}}
+@keyframes foamDrift{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+</style>
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<template id="__bundler_thumbnail" data-bg-color="#000000">
+  <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg">
+    <!-- Sky gradient -->
+    <defs>
+      <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0a0d18"/>
+        <stop offset="60%" stop-color="#1a1008"/>
+        <stop offset="100%" stop-color="#3a1e06"/>
+      </linearGradient>
+      <radialGradient id="glow" cx="50%" cy="58%" r="35%">
+        <stop offset="0%" stop-color="#c07830" stop-opacity="0.6"/>
+        <stop offset="100%" stop-color="#c07830" stop-opacity="0"/>
+      </radialGradient>
+    </defs>
+    <rect width="1280" height="720" fill="url(#sky)"/>
+    <rect width="1280" height="720" fill="url(#glow)"/>
+    <!-- Sea -->
+    <rect x="0" y="430" width="1280" height="290" fill="#0d1a2e" opacity="0.9"/>
+    <!-- Horizon shimmer -->
+    <ellipse cx="640" cy="430" rx="420" ry="12" fill="#c07830" opacity="0.18"/>
+    <!-- Boat silhouette -->
+    <path d="M480 560 Q530 575 640 577 Q750 575 800 560 Z" fill="#080504"/>
+    <!-- Mast with marlin skeleton -->
+    <line x1="560" y1="480" x2="790" y2="490" stroke="#3a2e1a" stroke-width="5"/>
+    <!-- Figure -->
+    <ellipse cx="520" cy="548" rx="18" ry="14" fill="#0e0a06"/>
+    <circle cx="503" cy="534" r="11" fill="#130d06"/>
+    <!-- Sun disk -->
+    <circle cx="640" cy="160" r="52" fill="#c07830" opacity="0.55"/>
+    <circle cx="640" cy="160" r="32" fill="#e8a84a" opacity="0.7"/>
+    <!-- Title text hint -->
+    <rect x="260" y="80" width="760" height="6" rx="3" fill="#c07830" opacity="0.35"/>
+    <rect x="380" y="100" width="520" height="4" rx="2" fill="#c07830" opacity="0.2"/>
+  </svg>
+</template>
+</head>
+<body>
+<div id="root" style="position:fixed;inset:0"></div>
+<script type="text/babel" src="animations.jsx"></script>
+<script type="text/babel">
+
+// ─── AUDIO ENGINE ──────────────────────────────────────────────────────────
+const AE = (() => {
+  let ctx, master, oceanGain, oceanFilter, tensionOsc, tensionGain, ready=false;
+
+  function init() {
+    if(ready) return;
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value=0.75; master.connect(ctx.destination);
+    ready = true;
+    _buildOcean(); _buildTension();
+  }
+
+  function _noise(dur=6) {
+    const buf = ctx.createBuffer(1, ctx.sampleRate*dur, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i]=Math.random()*2-1;
+    return buf;
+  }
+
+  function _buildOcean() {
+    const src = ctx.createBufferSource();
+    src.buffer = _noise(8); src.loop=true;
+    oceanFilter = ctx.createBiquadFilter();
+    oceanFilter.type='lowpass'; oceanFilter.frequency.value=250; oceanFilter.Q.value=2;
+    const hpf = ctx.createBiquadFilter(); hpf.type='highpass'; hpf.frequency.value=60;
+    oceanGain = ctx.createGain(); oceanGain.gain.value=0.1;
+    src.connect(oceanFilter); oceanFilter.connect(hpf); hpf.connect(oceanGain); oceanGain.connect(master);
+    src.start();
+  }
+
+  function _buildTension() {
+    tensionOsc = ctx.createOscillator();
+    tensionGain = ctx.createGain();
+    tensionOsc.type='sawtooth'; tensionOsc.frequency.value=45;
+    tensionGain.gain.value=0;
+    const lpf = ctx.createBiquadFilter(); lpf.type='lowpass'; lpf.frequency.value=200;
+    tensionOsc.connect(lpf); lpf.connect(tensionGain); tensionGain.connect(master);
+    tensionOsc.start();
+  }
+
+  function ocean(level) {
+    if(!ready) return;
+    oceanGain.gain.setTargetAtTime(0.04+level*0.22, ctx.currentTime, 0.6);
+    oceanFilter.frequency.setTargetAtTime(120+level*700, ctx.currentTime, 0.6);
+  }
+
+  function tension(level) {
+    if(!ready) return;
+    tensionGain.gain.setTargetAtTime(level*0.13, ctx.currentTime, 0.4);
+    tensionOsc.frequency.setTargetAtTime(38+level*28, ctx.currentTime, 0.5);
+  }
+
+  function impact() {
+    if(!ready) return;
+    [80,55,160].forEach((f,i)=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type=i===2?'square':'sine';
+      o.frequency.setValueAtTime(f,ctx.currentTime);
+      o.frequency.exponentialRampToValueAtTime(f*0.1,ctx.currentTime+1.2);
+      g.gain.setValueAtTime(i===2?0.3:0.5,ctx.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+1.5);
+      o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime+1.6);
+    });
+    splash(0.8);
+  }
+
+  function splash(vol=0.5) {
+    if(!ready) return;
+    const src=ctx.createBufferSource(); src.buffer=_noise(1);
+    const hpf=ctx.createBiquadFilter(); hpf.type='highpass'; hpf.frequency.value=1200;
+    const bpf=ctx.createBiquadFilter(); bpf.type='bandpass'; bpf.frequency.value=3000;
+    const g=ctx.createGain(); g.gain.setValueAtTime(vol,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+1.2);
+    src.connect(hpf); hpf.connect(bpf); bpf.connect(g); g.connect(master); src.start(); src.stop(ctx.currentTime+1.3);
+  }
+
+  function sharkHit() {
+    if(!ready) return;
+    // brutal thud
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.setValueAtTime(50,ctx.currentTime); o.frequency.exponentialRampToValueAtTime(18,ctx.currentTime+0.4);
+    g.gain.setValueAtTime(0.9,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.5);
+    o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime+0.6);
+    splash(0.4);
+  }
+
+  function warmChord() {
+    if(!ready) return;
+    // A minor chord with warm sine waves — nostalgic
+    [110,130.8,165,220].forEach((f,i)=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0,ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.06,ctx.currentTime+0.5+i*0.25);
+      g.gain.setValueAtTime(0.06,ctx.currentTime+3);
+      g.gain.linearRampToValueAtTime(0,ctx.currentTime+6);
+      o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime+7);
+    });
+  }
+
+  function finalChord() {
+    if(!ready) return;
+    [110,138.6,165,220,330].forEach((f,i)=>{
+      const o=ctx.createOscillator(), g=ctx.createGain();
+      o.type='sine'; o.frequency.value=f;
+      g.gain.setValueAtTime(0,ctx.currentTime);
+      g.gain.linearRampToValueAtTime(0.07,ctx.currentTime+0.8+i*0.3);
+      g.gain.setValueAtTime(0.07,ctx.currentTime+4);
+      g.gain.linearRampToValueAtTime(0,ctx.currentTime+8);
+      o.connect(g); g.connect(master); o.start(); o.stop(ctx.currentTime+9);
+    });
+  }
+
+  function heartbeat(on) {
+    if(!ready) return;
+    if(on) {
+      _hbInterval = setInterval(()=>{
+        _thump(0); setTimeout(()=>_thump(0.2), 250);
+      }, 750);
+    } else {
+      clearInterval(_hbInterval);
+    }
+  }
+  let _hbInterval=null;
+  function _thump(d) {
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.frequency.setValueAtTime(55,ctx.currentTime+d); o.frequency.exponentialRampToValueAtTime(18,ctx.currentTime+d+0.18);
+    g.gain.setValueAtTime(0.35,ctx.currentTime+d); g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+d+0.22);
+    o.connect(g); g.connect(master); o.start(ctx.currentTime+d); o.stop(ctx.currentTime+d+0.25);
+  }
+
+  return { init, ocean, tension, impact, splash, sharkHit, warmChord, finalChord, heartbeat };
+})();
+
+// ─── UTILITY ───────────────────────────────────────────────────────────────
+function lerp(a,b,t){ return a+(b-a)*t; }
+function inv(x,a,b){ return clamp((x-a)/(b-a),0,1); }
+function fade(t,in_,hold_,out_){ const fi=inv(t,0,in_); const fo=1-inv(t,hold_,hold_+out_); return Math.min(fi,fo); }
+
+// ─── WAVE LAYER ────────────────────────────────────────────────────────────
+function WaveLayer({ y=400, color='rgba(255,255,255,0.08)', amp=1, spd=0.8, thick=0 }) {
+  const t = useTime();
+  const pts = [];
+  const segs = 14;
+  for(let i=0;i<=segs;i++){
+    const x=i/segs*1280;
+    const dy = Math.sin(t*spd + i*0.7)*12*amp + Math.sin(t*spd*1.3+i*1.1)*6*amp;
+    pts.push([x, y+dy]);
+  }
+  const d = `M${pts[0][0]} ${pts[0][1]} ` +
+    pts.slice(1).map(p=>`L${p[0]} ${p[1]}`).join(' ') +
+    ` L1280 720 L0 720 Z`;
+  return (
+    <svg style={{position:'absolute',inset:0,width:'100%',height:'100%',pointerEvents:'none'}} viewBox="0 0 1280 720" preserveAspectRatio="none">
+      {thick>0 && <path d={d} fill="none" stroke={color} strokeWidth={thick}/>}
+      {thick===0 && <path d={d} fill={color}/>}
+    </svg>
+  );
+}
+
+// ─── BOAT + ROWER ──────────────────────────────────────────────────────────
+function SkiffAndRower({ cx=640, cy=400, sc=1, rowing=true, tilt=0 }) {
+  const t = useTime();
+  const bob = Math.sin(t*1.4)*5;
+  const roll = Math.sin(t*1.2)*1.5 + tilt;
+  const oarAngle = rowing ? Math.sin(t*2.2)*22 : 0;
+  return (
+    <g transform={`translate(${cx},${cy+bob}) scale(${sc}) rotate(${roll})`}>
+      {/* hull */}
+      <path d="M-90 0 Q-80 24 0 26 Q80 24 90 0 Z" fill="#110a04"/>
+      <path d="M-90 0 L90 0" stroke="#1e1208" strokeWidth="3"/>
+      {/* railing */}
+      <path d="M-85 0 L85 0" stroke="#2a1a0a" strokeWidth="1.5"/>
+      {/* figure */}
+      <g transform="translate(0,-28)">
+        <rect x="-7" y="-22" width="14" height="30" rx="4" fill="#160e04"/>
+        <circle cx="0" cy="-30" r="10" fill="#201408"/>
+        {/* left oar */}
+        <g style={{transformOrigin:'−7px -8px', transform:`rotate(${-oarAngle}deg)`}}>
+          <line x1="-7" y1="-8" x2="-60" y2="12" stroke="#120a02" strokeWidth="4" strokeLinecap="round"/>
+          <ellipse cx="-62" cy="14" rx="5" ry="12" fill="#120a02" transform="rotate(-20,-62,14)"/>
+        </g>
+        {/* right oar */}
+        <g style={{transformOrigin:'7px -8px', transform:`rotate(${oarAngle}deg)`}}>
+          <line x1="7" y1="-8" x2="60" y2="12" stroke="#120a02" strokeWidth="4" strokeLinecap="round"/>
+          <ellipse cx="62" cy="14" rx="5" ry="12" fill="#120a02" transform="rotate(20,62,14)"/>
+        </g>
+      </g>
+    </g>
+  );
+}
+
+// ─── STARS ─────────────────────────────────────────────────────────────────
+function Stars({ count=40, maxY=0.4 }) {
+  const stars = React.useMemo(()=>Array.from({length:count},(_,i)=>({
+    x: (i*137.5)%100,
+    y: (i*73.1)%(maxY*100),
+    r: i%5===0?1.5:i%3===0?1:0.7,
+    anim: `starTwinkle ${2+i%3}s ${(i*0.37)%2}s ease-in-out infinite`
+  })),[count,maxY]);
+  return (
+    <>
+      {stars.map((s,i)=>(
+        <div key={i} style={{
+          position:'absolute', left:`${s.x}%`, top:`${s.y}%`,
+          width:s.r*2, height:s.r*2, borderRadius:'50%',
+          background:'#fff', opacity:0.6,
+          animation:s.anim
+        }}/>
+      ))}
+    </>
+  );
+}
+
+// ─── VIGNETTE ──────────────────────────────────────────────────────────────
+function Vignette({ strength=0.65 }) {
+  return (
+    <div style={{
+      position:'absolute',inset:0,pointerEvents:'none',zIndex:95,
+      background:`radial-gradient(ellipse at 50% 50%, transparent 50%, rgba(0,0,0,${strength}) 100%)`
+    }}/>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 1 — The Book & The Dawn (0–8s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene1() {
+  const t = useTime();
+  const p = inv(t,0,8);
+  const fi = fade(t, 1, 6, 2);
+
+  const skyL = `oklch(${lerp(6,22,p)}% 0.04 ${lerp(268,240,p)}deg)`;
+  const skyR = `oklch(${lerp(18,48,p)}% ${lerp(0.05,0.14,p)} ${lerp(265,55,p)}deg)`;
+  const seaC = `oklch(${lerp(10,30,p)}% 0.1 ${lerp(250,220,p)}deg)`;
+
+  const bookO = clamp(inv(t,0.5,3),0,1) * (1-clamp(inv(t,5.5,7.5),0,1));
+  const bookS = lerp(0.82,1,Easing.easeOutBack(clamp(inv(t,0.5,2.5),0,1)));
+  const titleO = clamp(inv(t,2.5,4),0,1) * (1-clamp(inv(t,6,7.5),0,1));
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* Sky */}
+      <div style={{position:'absolute',inset:0,background:`linear-gradient(185deg,${skyL} 0%,${skyR} 100%)`}}/>
+      {/* Horizon glow */}
+      <div style={{
+        position:'absolute',left:'5%',right:'5%',top:'44%',height:'14%',
+        background:'radial-gradient(ellipse at 50% 100%,oklch(72% 0.22 60deg) 0%,transparent 68%)',
+        opacity: p*0.85, filter:'blur(22px)'
+      }}/>
+      {/* Sea */}
+      <div style={{position:'absolute',bottom:0,left:0,right:0,height:'46%',background:`linear-gradient(180deg,${seaC} 0%,oklch(${lerp(7,18,p)}% 0.06 240deg) 100%)`}}/>
+      {/* Sea shimmer streaks */}
+      {p>0.2 && [0.2,0.35,0.5,0.62,0.78].map((lx,i)=>(
+        <div key={i} style={{
+          position:'absolute', left:`${lx*100}%`, top:'56%',
+          width:1, height:`${8+i*3}%`,
+          background:`linear-gradient(180deg,oklch(70% 0.18 60deg),transparent)`,
+          opacity:p*0.18*((i%2)+0.5), transform:`skewX(${-5+i*3}deg)`
+        }}/>
+      ))}
+      {/* Dock planks */}
+      <div style={{
+        position:'absolute',bottom:'33%',left:'12%',right:'12%',height:'7%',
+        background:'repeating-linear-gradient(90deg,#3a2410 0,#3a2410 36px,#4a3218 36px,#4a3218 38px)',
+        opacity:Math.min(p*2,0.88), borderRadius:2
+      }}/>
+      {/* BOOK */}
+      <div style={{
+        position:'absolute',left:'50%',top:'29%',
+        transform:`translate(-50%,-50%) scale(${bookS})`,
+        opacity:bookO, width:110,height:152
+      }}>
+        <div style={{
+          width:110,height:152,
+          background:'linear-gradient(135deg,#7a3810 0%,#9a4e1e 35%,#5e2a0c 65%,#7a3810 100%)',
+          borderRadius:'2px 7px 7px 2px',
+          boxShadow:'5px 5px 24px rgba(0,0,0,.85),inset 0 0 28px rgba(0,0,0,.3)',
+          border:'1px solid #5a2e10',position:'relative',overflow:'hidden'
+        }}>
+          <div style={{position:'absolute',left:0,top:0,bottom:0,width:11,background:'linear-gradient(180deg,#4a2209,#6e3214)',borderRight:'1px solid rgba(0,0,0,.35)'}}/>
+          <div style={{position:'absolute',left:0,top:0,right:0,bottom:0,background:'repeating-linear-gradient(0deg,transparent 0,transparent 18px,rgba(0,0,0,.07) 18px,rgba(0,0,0,.07) 19px)',opacity:.6}}/>
+          <div style={{position:'absolute',top:18,left:15,right:6,textAlign:'center',fontFamily:'Georgia,serif',fontSize:10,color:'rgba(255,215,140,.9)',letterSpacing:'.06em',lineHeight:1.5,textTransform:'uppercase'}}>
+            The Old Man<br/>&amp; the Sea
+          </div>
+          <div style={{position:'absolute',top:62,left:18,right:6,height:32,background:'linear-gradient(90deg,transparent,rgba(255,180,80,.08),transparent)',borderTop:'1px solid rgba(255,180,60,.15)',borderBottom:'1px solid rgba(255,180,60,.15)'}}/>
+          <div style={{position:'absolute',bottom:18,left:15,right:6,textAlign:'center',fontFamily:'Georgia,serif',fontSize:8.5,color:'rgba(255,190,90,.65)',letterSpacing:'.12em'}}>HEMINGWAY</div>
+        </div>
+      </div>
+      {/* Title */}
+      <div style={{position:'absolute',bottom:'12%',left:0,right:0,textAlign:'center',opacity:titleO}}>
+        <div style={{fontFamily:'Georgia,"Times New Roman",serif',fontSize:50,fontWeight:400,color:'oklch(90% 0.16 62deg)',letterSpacing:'.14em',textTransform:'uppercase',textShadow:'0 2px 22px rgba(0,0,0,.8)'}}>
+          The Old Man and the Sea
+        </div>
+        <div style={{fontFamily:'Georgia,serif',fontSize:19,fontStyle:'italic',color:'oklch(72% 0.12 60deg)',marginTop:6,letterSpacing:'.28em',textShadow:'0 2px 12px rgba(0,0,0,.7)'}}>
+          Ernest Hemingway
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 2 — Santiago Rows Out (8–16s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene2() {
+  const t = useTime(); const lt = t-8;
+  const fi = fade(lt,1.5,5.5,1.5);
+  const p = inv(lt,0,8);
+  // boat moves left→right across frame
+  const boatX = lerp(160, 920, Easing.easeInOutSine(p));
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* Sky */}
+      <div style={{position:'absolute',inset:0,background:`linear-gradient(180deg,oklch(${lerp(12,18,p)}% 0.04 ${lerp(262,250,p)}deg) 0%,oklch(${lerp(28,38,p)}% ${lerp(0.1,0.15,p)} ${lerp(230,215,p)}deg) 55%,oklch(${lerp(42,35,p)}% 0.18 55deg) 100%)`}}/>
+      {/* Horizon luminance */}
+      <div style={{position:'absolute',top:'44%',left:'15%',right:'15%',height:'8%',background:'radial-gradient(ellipse at 50% 100%,oklch(65% 0.22 58deg) 0%,transparent 70%)',opacity:lerp(0.3,0.5,p),filter:'blur(18px)'}}/>
+      {/* Havana skyline */}
+      <svg style={{position:'absolute',bottom:'36%',left:0,right:0,width:'100%',height:110}} viewBox="0 0 1280 110" preserveAspectRatio="none">
+        <path d="M0 110 L0 68 L50 68 L50 55 L70 55 L70 44 L88 44 L88 55 L120 55 L120 65 L155 65 L155 52 L172 52 L172 40 L185 40 L185 28 L192 16 L199 28 L199 40 L212 40 L212 52 L248 52 L248 68 L290 68 L290 58 L315 58 L315 46 L328 46 L328 58 L370 58 L370 68 L430 68 L430 62 L460 62 L460 52 L480 52 L480 68 L560 68 L560 75 L640 75 L680 72 L730 68 L800 68 L900 72 L980 72 L1060 68 L1140 72 L1220 68 L1280 72 L1280 110 Z" fill="oklch(9% 0.02 260deg)"/>
+        <ellipse cx="192" cy="14" rx="10" ry="7" fill="oklch(8% 0.02 260deg)"/>
+        <rect x="190" y="-2" width="5" height="16" fill="oklch(8% 0.02 260deg)"/>
+      </svg>
+      {/* Sea */}
+      <div style={{position:'absolute',bottom:0,left:0,right:0,height:'38%',background:`linear-gradient(180deg,oklch(${lerp(22,28,p)}% 0.14 ${lerp(218,210,p)}deg) 0%,oklch(${lerp(14,18,p)}% 0.08 228deg) 100%)`}}/>
+      <WaveLayer y={430} color={`rgba(${lerp(30,50,p)},${lerp(60,90,p)},${lerp(120,160,p)},0.3)`} amp={0.8} spd={0.7}/>
+      <WaveLayer y={460} color={`rgba(15,35,80,0.35)`} amp={1.2} spd={0.5}/>
+      {/* Moon reflection or sun */}
+      <div style={{position:'absolute',left:'20%',top:'10%',width:70,height:70,borderRadius:'50%',background:'radial-gradient(circle,oklch(95% 0.06 75deg) 0%,oklch(82% 0.2 65deg) 50%,transparent 75%)',filter:'blur(6px)',opacity:.75}}/>
+      {/* Boat */}
+      <svg style={{position:'absolute',inset:0,overflow:'visible'}} width="1280" height="720" viewBox="0 0 1280 720">
+        <SkiffAndRower cx={boatX} cy={460} sc={0.95} rowing={true}/>
+      </svg>
+      {/* Wake */}
+      <div style={{
+        position:'absolute',
+        left: boatX-180, top: 453,
+        width:190, height:14,
+        background:'linear-gradient(90deg,transparent,rgba(150,200,255,0.12),transparent)',
+        filter:'blur(4px)', transform:'scaleX(-1)',
+        opacity: 0.7
+      }}/>
+      {/* Caption */}
+      <div style={{position:'absolute',top:'8%',left:0,right:0,textAlign:'center',opacity:clamp(inv(lt,1,2.5),0,1)*clamp(1-inv(lt,6.5,8),0,1)}}>
+        <div style={{fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:22,color:'oklch(78% 0.09 60deg)',letterSpacing:'.1em',textShadow:'0 2px 12px rgba(0,0,0,.85)'}}>
+          He was an old man who fished alone in a skiff in the Gulf Stream
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 3 — The Marlin Leaps (16–27s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene3() {
+  const t = useTime(); const lt = t-16;
+  const fi = fade(lt,1.5,8,2);
+
+  // Marlin arc: peaks at lt≈4
+  const arcP = inv(lt,1,7);
+  const arcEase = Easing.easeInOutSine(Math.sin(arcP*Math.PI));
+  const marlinX = lerp(380, 820, arcP);
+  const marlinY = 370 - arcEase*230;
+  const marlinRot = lerp(-52, 52, arcP);
+
+  const splashO = clamp(inv(lt,1,2.5),0,1)*(1-clamp(inv(lt,5,7),0,1));
+  const sprayP = clamp(inv(lt,1,3.5),0,1)*(1-clamp(inv(lt,4.5,6.5),0,1));
+  const handsO = clamp(inv(lt,6.5,8),0,1)*(1-clamp(inv(lt,10,11),0,1));
+  const bloodO = clamp(inv(lt,7.5,9.5),0,1);
+  const ropeO = clamp(inv(lt,1.5,3),0,1)*(1-clamp(inv(lt,5.5,7),0,1));
+  const skiffPull = clamp(inv(lt,2,6),0,1)*120;
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* Deep electric ocean sky */}
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,oklch(9% 0.07 235deg) 0%,oklch(16% 0.14 222deg) 45%,oklch(24% 0.2 212deg) 100%)'}}/>
+      {/* Blazing sun */}
+      <div style={{position:'absolute',left:'14%',top:'9%',width:90,height:90,borderRadius:'50%',background:'radial-gradient(circle,oklch(97% 0.04 85deg) 0%,oklch(88% 0.22 68deg) 45%,transparent 72%)',filter:'blur(7px)',opacity:.82}}/>
+      {/* Horizon shimmer */}
+      <div style={{position:'absolute',top:'53.5%',left:0,right:0,height:3,background:'linear-gradient(90deg,transparent 5%,oklch(70% 0.2 200deg) 25%,oklch(82% 0.15 195deg) 50%,oklch(70% 0.2 200deg) 75%,transparent 95%)',opacity:.45}}/>
+      {/* Sea surface */}
+      <div style={{position:'absolute',bottom:0,left:0,right:0,top:'53%',background:'linear-gradient(180deg,oklch(22% 0.2 215deg) 0%,oklch(13% 0.12 230deg) 100%)'}}/>
+      <WaveLayer y={540} color="rgba(10,30,80,0.5)" amp={1.5} spd={1.2}/>
+      <WaveLayer y={570} color="rgba(5,18,55,0.6)" amp={1} spd={0.8}/>
+
+      {/* Splash base */}
+      <div style={{
+        position:'absolute',left:marlinX-100,top:'51%',
+        width:200,height:90,
+        background:'radial-gradient(ellipse at 50% 80%,rgba(200,225,255,.7) 0%,rgba(120,180,255,.3) 40%,transparent 70%)',
+        transform:`scaleX(${0.5+splashO*1.1})`,
+        opacity:splashO, filter:'blur(4px)'
+      }}/>
+
+      {/* Spray droplets */}
+      {Array.from({length:16},(_,i)=>{
+        const ang = (i/16)*Math.PI*2;
+        const r = 35+i%4*22;
+        const dx = Math.cos(ang)*r*(1+sprayP*1.5);
+        const dy = -Math.abs(Math.sin(ang))*r*(0.8+sprayP*1.2)-sprayP*40;
+        return (
+          <div key={i} style={{
+            position:'absolute',
+            left:marlinX+dx, top:'51%',
+            transform:`translateY(${dy}px)`,
+            width:3+(i%3)*3,height:3+(i%3)*3,borderRadius:'50%',
+            background:'rgba(210,235,255,.85)',
+            opacity:sprayP*(0.6+i%2*0.3),
+          }}/>
+        );
+      })}
+
+      {/* THE MARLIN */}
+      <div style={{
+        position:'absolute',left:marlinX,top:marlinY,
+        transform:`translate(-50%,-50%) rotate(${marlinRot}deg)`,
+        opacity:clamp(inv(lt,1,2.5),0,1)*(1-clamp(inv(lt,5.5,7),0,1)),
+        filter:'drop-shadow(0 0 12px rgba(100,180,255,0.5))'
+      }}>
+        <svg width="300" height="75" viewBox="0 0 300 75">
+          <defs>
+            <linearGradient id="mg" x1="0%" y1="30%" x2="100%" y2="70%">
+              <stop offset="0%" stopColor="oklch(62% 0.18 245deg)"/>
+              <stop offset="30%" stopColor="oklch(82% 0.08 200deg)"/>
+              <stop offset="65%" stopColor="oklch(68% 0.22 225deg)"/>
+              <stop offset="100%" stopColor="oklch(48% 0.2 235deg)"/>
+            </linearGradient>
+          </defs>
+          <path d="M5 38 Q45 12 130 26 Q210 30 262 37 Q230 48 130 50 Q45 58 5 38 Z" fill="url(#mg)"/>
+          <path d="M262 37 L298 35 L298 39 Z" fill="oklch(72% 0.06 200deg)"/>
+          <path d="M75 26 Q112 2 148 22 L75 26 Z" fill="oklch(42% 0.2 235deg)"/>
+          <path d="M5 38 L-18 16 L-4 35 L-18 58 L5 38 Z" fill="oklch(52% 0.17 235deg)"/>
+          <path d="M22 36 Q130 30 252 36" stroke="oklch(92% 0.06 190deg)" strokeWidth="1.5" fill="none" strokeDasharray="5 4" opacity=".7"/>
+          <path d="M90 42 Q150 44 220 42" stroke="rgba(255,255,255,0.2)" strokeWidth="1" fill="none"/>
+        </svg>
+      </div>
+
+      {/* Rope from skiff to marlin */}
+      <svg style={{position:'absolute',inset:0,pointerEvents:'none'}} width="1280" height="720">
+        <path d={`M ${260+skiffPull} 600 Q ${marlinX*0.55} 540 ${marlinX-80} ${marlinY+20}`}
+          stroke="rgba(180,155,105,0.65)" strokeWidth="2.5" fill="none" opacity={ropeO}
+          strokeDasharray="0"/>
+      </svg>
+
+      {/* Skiff being dragged */}
+      <svg style={{position:'absolute',inset:0,overflow:'visible'}} width="1280" height="720" viewBox="0 0 1280 720">
+        <SkiffAndRower cx={200+skiffPull} cy={590} sc={0.75} rowing={false} tilt={skiffPull/60}/>
+      </svg>
+
+      {/* Hands close-up overlay */}
+      <div style={{position:'absolute',inset:0,opacity:handsO}}>
+        <div style={{position:'absolute',inset:0,background:'rgba(0,0,0,.35)'}}/>
+        <div style={{position:'absolute',left:'50%',top:'48%',transform:'translate(-50%,-50%)'}}>
+          <svg width="420" height="180" viewBox="0 0 420 180">
+            <defs>
+              <radialGradient id="hg" cx="50%" cy="40%" r="55%">
+                <stop offset="0%" stopColor="oklch(52% 0.14 32deg)"/>
+                <stop offset="100%" stopColor="oklch(28% 0.08 28deg)"/>
+              </radialGradient>
+            </defs>
+            {/* Left hand gripping rope */}
+            <g transform="translate(90,90)">
+              <path d="M-35 25 Q-25-18-5-26 Q12-34 26-22 Q38-14 32 4 Q44-10 52-2 Q62 10 54 26 Q66 12 72 24 Q78 36 62 44 Q56 34 38 44 Q22 52 2 56 Q-18 52-35 25 Z" fill="url(#hg)"/>
+              <path d="M-10 5 Q18 10 30 22" stroke="rgba(0,0,0,.25)" strokeWidth="1.5" fill="none"/>
+              <path d="M-8 14 Q20 18 32 30" stroke="rgba(0,0,0,.2)" strokeWidth="1.2" fill="none"/>
+              {/* Rope */}
+              <line x1="-35" y1="32" x2="320" y2="32" stroke="rgba(155,130,75,.85)" strokeWidth="6" strokeLinecap="round"/>
+            </g>
+            {/* Right hand */}
+            <g transform="translate(300,90)">
+              <path d="M-35 25 Q-25-18-5-26 Q12-34 26-22 Q38-14 32 4 Q44-10 52-2 Q62 10 54 26 Q66 12 72 24 Q78 36 62 44 Q56 34 38 44 Q22 52 2 56 Q-18 52-35 25 Z" fill="url(#hg)"/>
+            </g>
+            {/* Blood */}
+            {bloodO>0 && <>
+              <circle cx="108" cy="122" r="5" fill={`rgba(170,18,18,${bloodO*.9})`}/>
+              <path d={`M108 127 Q110 ${127+bloodO*32} 108 ${127+bloodO*42}`} stroke={`rgba(165,15,15,${bloodO*.8})`} strokeWidth="3.5" fill="none"/>
+              <circle cx="320" cy="118" r="3.5" fill={`rgba(160,16,16,${bloodO*.7})`}/>
+            </>}
+          </svg>
+        </div>
+      </div>
+
+      <div style={{position:'absolute',bottom:'7%',left:0,right:0,textAlign:'center',opacity:clamp(inv(lt,2,3.5),0,1)*clamp(1-inv(lt,10,11),0,1)}}>
+        <div style={{fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:22,color:'rgba(255,235,195,.9)',letterSpacing:'.07em',textShadow:'0 2px 18px rgba(0,0,0,.9)'}}>
+          Man vs. Nature — the fish is his brother and his enemy
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 4 — Endurance Montage (27–35s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene4() {
+  const t = useTime(); const lt = t-27;
+  const fi = fade(lt,1,6,1.5);
+  const sub = lt<2.7?0:lt<5.4?1:2;
+  const subT = sub===0?lt/2.7:sub===1?(lt-2.7)/2.7:(lt-5.4)/2.6;
+  const subFi = Math.min(inv(subT*8,0,1), 1-inv(subT,0.88,1));
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,oklch(11% 0.06 225deg) 0%,oklch(20% 0.16 215deg) 55%,oklch(26% 0.2 210deg) 100%)'}}/>
+      {/* Pitiless sun */}
+      <div style={{position:'absolute',left:'50%',top:'7%',width:110,height:110,marginLeft:-55,borderRadius:'50%',background:'radial-gradient(circle,oklch(98% 0.02 82deg) 0%,oklch(88% 0.22 68deg) 38%,transparent 70%)',filter:'blur(8px)',opacity:.88}}/>
+      <div style={{position:'absolute',left:'50%',top:'5%',width:200,height:200,marginLeft:-100,borderRadius:'50%',background:'radial-gradient(circle,rgba(255,200,80,.12) 0%,transparent 65%)',filter:'blur(18px)'}}/>
+      <WaveLayer y={430} color="rgba(10,28,75,0.35)" amp={0.7} spd={0.6}/>
+
+      {/* SUB 0 — Coiling the line */}
+      {sub===0 && (
+        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',opacity:subFi}}>
+          <div>
+            <svg width="460" height="320" viewBox="0 0 460 320">
+              <defs>
+                <radialGradient id="hnd" cx="45%" cy="38%" r="55%">
+                  <stop offset="0%" stopColor="oklch(50% 0.13 33deg)"/>
+                  <stop offset="100%" stopColor="oklch(28% 0.07 28deg)"/>
+                </radialGradient>
+              </defs>
+              {/* Hand */}
+              <g transform="translate(100,175)">
+                <path d="M-42 32 Q-30-22-4-30 Q16-40 32-26 Q44-16 36 2 Q50-14 60-4 Q70 8 62 26 Q74 10 82 20 Q90 34 76 46 Q70 34 52 44 Q34 56 10 60 Q-14 56-42 32 Z" fill="url(#hnd)"/>
+                <path d="M-4 2 Q22 7 36 22" stroke="rgba(0,0,0,.2)" strokeWidth="1.5" fill="none"/>
+                <path d="M0 12 Q26 16 40 30" stroke="rgba(0,0,0,.18)" strokeWidth="1.2" fill="none"/>
+              </g>
+              {/* Coiled rope */}
+              {Array.from({length:7},(_,i)=>{
+                const a = (i/7)*Math.PI*2 + lt*2.8;
+                const rx = 68+i*14, ry=rx*0.38;
+                return <ellipse key={i} cx={230} cy={185} rx={rx} ry={ry} fill="none" stroke="rgba(155,130,75,.7)" strokeWidth={i===0?4:3-i*0.3} transform={`rotate(${a*57},230,185)`} opacity={.4+i*.08}/>;
+              })}
+              <path d={`M ${230+Math.cos(lt*2.8)*68} ${185+Math.sin(lt*2.8)*26} Q 235 160 245 140`} stroke="rgba(155,130,75,.8)" strokeWidth="4" fill="none"/>
+            </svg>
+            <div style={{textAlign:'center',fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:20,color:'rgba(255,225,175,.8)',textShadow:'0 2px 12px rgba(0,0,0,.9)',marginTop:4}}>The Heroism of Routine</div>
+          </div>
+        </div>
+      )}
+
+      {/* SUB 1 — Rowing relentlessly */}
+      {sub===1 && (
+        <div style={{position:'absolute',inset:0,opacity:subFi}}>
+          <div style={{position:'absolute',bottom:0,left:0,right:0,height:'43%',background:'linear-gradient(180deg,oklch(26% 0.18 210deg) 0%,oklch(16% 0.1 228deg) 100%)'}}/>
+          <div style={{position:'absolute',top:'51%',left:0,right:0,height:2,background:'linear-gradient(90deg,transparent 8%,rgba(80,130,200,.45) 20%,rgba(80,130,200,.45) 80%,transparent 92%)'}}/>
+          <svg style={{position:'absolute',inset:0,overflow:'visible'}} width="1280" height="720" viewBox="0 0 1280 720">
+            <SkiffAndRower cx={640} cy={520} sc={1.25} rowing={true}/>
+          </svg>
+          <WaveLayer y={475} color="rgba(8,22,65,0.5)" amp={1.2} spd={1}/>
+          <div style={{position:'absolute',top:'10%',left:0,right:0,textAlign:'center',fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:21,color:'rgba(185,210,255,.7)',textShadow:'0 2px 12px rgba(0,0,0,.9)'}}>
+            One stroke at a time. One mile at a time.
+          </div>
+        </div>
+      )}
+
+      {/* SUB 2 — Raw tuna */}
+      {sub===2 && (
+        <div style={{position:'absolute',inset:0,opacity:subFi,display:'flex',alignItems:'center',justifyContent:'center',flexDirection:'column'}}>
+          <svg width="320" height="210" viewBox="0 0 320 210">
+            <defs>
+              <linearGradient id="tuna" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stopColor="oklch(52% 0.18 200deg)"/>
+                <stop offset="50%" stopColor="oklch(68% 0.1 190deg)"/>
+                <stop offset="100%" stopColor="oklch(42% 0.22 210deg)"/>
+              </linearGradient>
+              <radialGradient id="hnd2" cx="48%" cy="42%" r="52%">
+                <stop offset="0%" stopColor="oklch(50% 0.13 33deg)"/>
+                <stop offset="100%" stopColor="oklch(26% 0.07 28deg)"/>
+              </radialGradient>
+            </defs>
+            {/* Raw tuna chunk */}
+            <path d="M75 85 Q118 62 205 78 Q240 85 228 110 Q205 128 116 120 Q84 114 75 85 Z" fill="url(#tuna)" opacity=".92"/>
+            <path d="M85 92 Q140 80 205 90" stroke="rgba(255,255,255,.12)" strokeWidth="1.5" fill="none"/>
+            {/* Hand holding it */}
+            <path d="M95 108 Q84 140 96 158 Q118 166 140 158 Q165 150 160 132 Q178 148 188 140 Q198 130 190 118 Q202 130 208 120 Q214 108 202 104 Q212 106 210 96 Q208 86 196 90 Q188 76 178 84 Q168 76 158 80 Q150 72 140 76 Q132 80 130 86 Q118 82 110 88 Q100 94 95 108 Z" fill="url(#hnd2)"/>
+          </svg>
+          <div style={{fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:20,color:'rgba(255,215,170,.8)',textShadow:'0 2px 12px rgba(0,0,0,.9)',marginTop:4,textAlign:'center'}}>
+            Raw tuna. Sustenance. Discipline. Survival.
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 5 — The Sharks (35–45s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene5() {
+  const t = useTime(); const lt = t-35;
+  const fi = fade(lt,1.5,7.5,1.5);
+  const intensity = clamp(lt/5,0,1);
+  const bloodP = clamp(inv(lt,2.5,7),0,1);
+
+  const s1x = ((lt*128+80)%920)+80;
+  const s2x = ((lt*95+470)%920)+80;
+  const s3x = ((lt*72+270)%920)+80;
+
+  const strikePhase = (lt%2.2);
+  const strikeRot = strikePhase<0.38 ? -48+strikePhase/0.38*96 : 48-(strikePhase-0.38)/1.82*96;
+  const strikeFlash = strikePhase<0.12 ? (strikePhase/0.12) : strikePhase<0.26 ? (1-(strikePhase-0.12)/0.14)*0.6 : 0;
+
+  const lanternFlicker = 0.82+Math.sin(lt*19.3)*0.1+Math.sin(lt*31.7)*0.06;
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* Night sky */}
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,oklch(4% 0.015 260deg) 0%,oklch(7% 0.025 250deg) 65%,oklch(10% 0.04 235deg) 100%)'}}/>
+      <Stars count={45} maxY={0.45}/>
+      {/* Moon */}
+      <div style={{position:'absolute',right:'14%',top:62,width:58,height:58,borderRadius:'50%',background:'radial-gradient(circle at 42% 42%,oklch(94% 0.025 80deg) 0%,oklch(84% 0.05 68deg) 62%,oklch(74% 0.08 62deg) 100%)',boxShadow:'0 0 28px rgba(255,240,195,.28)'}}/>
+      {/* Moon path on water */}
+      <div style={{position:'absolute',right:'14%',top:'52%',width:58,height:220,background:'linear-gradient(180deg,rgba(255,238,185,.14) 0%,transparent 100%)',filter:'blur(6px)'}}/>
+      {/* Sea */}
+      <div style={{position:'absolute',bottom:0,left:0,right:0,height:'52%',background:'linear-gradient(180deg,oklch(9% 0.045 232deg) 0%,oklch(5% 0.025 242deg) 100%)'}}/>
+      <WaveLayer y={420} color="rgba(5,15,45,0.65)" amp={intensity*2} spd={1.5}/>
+      <WaveLayer y={450} color="rgba(3,10,35,0.7)" amp={intensity*1.5} spd={1.2}/>
+
+      {/* Blood spreading */}
+      <div style={{
+        position:'absolute',left:`${25-bloodP*5}%`,top:'51%',
+        width:`${120+bloodP*350}px`,height:`${30+bloodP*55}px`,
+        background:`radial-gradient(ellipse at 50% 50%,rgba(160,0,0,${0.38*bloodP}) 0%,transparent 68%)`,
+        filter:'blur(12px)'
+      }}/>
+
+      {/* Foam churn */}
+      {intensity>0.3 && Array.from({length:6},(_,i)=>(
+        <div key={i} style={{
+          position:'absolute',
+          left:`${12+i*14}%`,top:`${50+Math.sin(lt*4.5+i)*2.5}%`,
+          width:`${60+Math.sin(lt*3+i)*25}px`,height:6,
+          background:'rgba(130,190,255,.28)',filter:'blur(4px)',borderRadius:'50%',
+          opacity:intensity*(0.4+Math.sin(lt*5.5+i)*.25)
+        }}/>
+      ))}
+
+      {/* Sharks */}
+      <svg style={{position:'absolute',inset:0}} width="1280" height="720">
+        {[[s1x,382,1],[s2x,394,0.85],[s3x,388,0.75]].map(([sx,sy,sc],i)=>(
+          <g key={i} transform={`translate(${sx},${sy+Math.sin(lt*2.8+i)*4}) scale(${sc})`}>
+            <path d="M0 0 L-18-30 L18 0 Z" fill={`rgba(16,26,48,${0.88+i*0.04})`}/>
+            <ellipse cx="0" cy="4" rx="35" ry="8" fill={`rgba(10,18,38,${0.75+i*0.04})`}/>
+          </g>
+        ))}
+      </svg>
+
+      {/* Santiago + Skiff */}
+      <div style={{position:'absolute',bottom:'18%',left:'32%'}}>
+        <svg width="280" height="160" viewBox="0 0 280 160">
+          <path d="M15 105 Q28 125 140 128 Q252 125 265 105 Z" fill="oklch(10% 0.02 32deg)"/>
+          <path d="M15 105 L265 105" stroke="oklch(16% 0.03 30deg)" strokeWidth="2.5"/>
+          <g transform="translate(140,75)">
+            <rect x="-8" y="-28" width="16" height="34" rx="3.5" fill="oklch(9% 0.02 30deg)"/>
+            <circle cx="0" cy="-36" r="10" fill="oklch(15% 0.04 32deg)"/>
+            {/* Harpoon arm */}
+            <g style={{transformOrigin:'0px -14px',transform:`rotate(${strikeRot}deg)`}}>
+              <line x1="0" y1="-14" x2="0" y2="-75" stroke="oklch(32% 0.04 32deg)" strokeWidth="4.5" strokeLinecap="round"/>
+              <path d="M-5-75 L0-90 L5-75 Z" fill="rgba(195,155,70,.92)"/>
+            </g>
+          </g>
+        </svg>
+      </div>
+
+      {/* Lantern glow */}
+      <div style={{
+        position:'absolute',bottom:'27%',left:'38%',
+        width:180,height:160,
+        background:`radial-gradient(circle,rgba(255,172,52,${0.28*lanternFlicker}) 0%,rgba(255,110,18,${0.12*lanternFlicker}) 42%,transparent 70%)`,
+        filter:'blur(6px)',
+        animation:'flicker .12s ease-in-out infinite'
+      }}/>
+
+      {/* Strike flash */}
+      {strikeFlash>0 && <div style={{position:'absolute',inset:0,background:`rgba(255,195,80,${strikeFlash*0.22})`,pointerEvents:'none'}}/>}
+
+      <div style={{position:'absolute',bottom:'6%',left:0,right:0,textAlign:'center',opacity:clamp(inv(lt,2.5,4),0,1)*clamp(1-inv(lt,9,10.5),0,1)}}>
+        <div style={{fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:21,color:'rgba(255,195,145,.9)',letterSpacing:'.07em',textShadow:'0 2px 16px rgba(0,0,0,.95)'}}>
+          Dignity in Defeat — he would not surrender what he had earned
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 6 — Memories (45–51s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene6() {
+  const t = useTime(); const lt = t-45;
+  const fi = fade(lt,1,4,1.2);
+  const sub = lt<3?0:1;
+  const subT = sub===0?lt/3:(lt-3)/3;
+  const subFi = inv(subT*6,0,1)*(1-inv(subT,0.85,1));
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* MEMORY label */}
+      <div style={{position:'absolute',top:'7%',left:0,right:0,textAlign:'center',opacity:clamp(lt/0.8,0,1),fontFamily:'Georgia,serif',fontSize:13,letterSpacing:'.45em',textTransform:'uppercase',color:'rgba(255,212,130,.55)',textShadow:'0 1px 8px rgba(0,0,0,.5)'}}>
+        ✦ &nbsp;memory&nbsp; ✦
+      </div>
+
+      {/* MEMORY 0 — Arm wrestling */}
+      {sub===0 && (
+        <div style={{position:'absolute',inset:0,opacity:subFi}}>
+          <div style={{position:'absolute',inset:0,background:'linear-gradient(135deg,oklch(12% 0.07 42deg) 0%,oklch(18% 0.09 48deg) 60%,oklch(10% 0.05 35deg) 100%)'}}/>
+          {/* Tavern glow */}
+          <div style={{position:'absolute',left:'50%',top:'35%',width:280,height:200,marginLeft:-140,background:'radial-gradient(ellipse at 50% 60%,rgba(255,165,45,.18) 0%,transparent 70%)',filter:'blur(18px)'}}/>
+          {/* Table */}
+          <div style={{position:'absolute',top:'57%',left:'18%',right:'18%',height:10,background:'oklch(28% 0.07 35deg)',boxShadow:'0 5px 22px rgba(0,0,0,.6)',borderRadius:2}}/>
+          {/* Arms + clash */}
+          <div style={{position:'absolute',top:'25%',left:'50%',transform:'translateX(-50%)'}}>
+            <svg width="440" height="260" viewBox="0 0 440 260">
+              <defs>
+                <linearGradient id="armA" x1="0%" y1="0%" x2="100%" y2="100%">
+                  <stop offset="0%" stopColor="oklch(52% 0.14 38deg)"/>
+                  <stop offset="100%" stopColor="oklch(34% 0.08 32deg)"/>
+                </linearGradient>
+                <linearGradient id="armB" x1="100%" y1="0%" x2="0%" y2="100%">
+                  <stop offset="0%" stopColor="oklch(44% 0.1 34deg)"/>
+                  <stop offset="100%" stopColor="oklch(28% 0.06 28deg)"/>
+                </linearGradient>
+              </defs>
+              {/* Left arm (young Santiago) */}
+              <path d="M48 210 Q68 165 92 138 Q112 118 132 128 Q152 138 148 160 Q162 144 172 138 Q182 128 174 116 Q168 104 154 108 Q160 94 150 88 Q136 80 124 88 Q118 74 104 78 Q90 82 90 96 Q76 88 68 96 Q58 106 64 120 Q48 120 42 136 Q34 154 48 210 Z" fill="url(#armA)"/>
+              {/* Right arm (rival) */}
+              <path d="M392 210 Q372 165 348 138 Q328 118 308 128 Q288 138 292 160 Q278 144 268 138 Q258 128 266 116 Q272 104 286 108 Q280 94 290 88 Q304 80 316 88 Q322 74 336 78 Q350 82 350 96 Q364 88 372 96 Q382 106 376 120 Q392 120 398 136 Q406 154 392 210 Z" fill="url(#armB)"/>
+              {/* Clasped hands */}
+              <circle cx="220" cy="170" r="30" fill="oklch(48% 0.12 36deg)"/>
+              <circle cx="220" cy="170" r="22" fill="oklch(52% 0.14 38deg)" opacity=".75"/>
+              {/* Strain cracks */}
+              {[-28,0,28].map((dy,i)=>(
+                <line key={i} x1={180} y1={170+dy} x2={260} y2={170+dy} stroke="rgba(255,170,70,.22)" strokeWidth={i===1?2:1.2}/>
+              ))}
+              {/* Hanging lantern hint */}
+              <ellipse cx="220" cy="60" rx="22" ry="16" fill="rgba(255,165,45,.18)"/>
+              <line x1="220" y1="44" x2="220" y2="20" stroke="rgba(120,80,30,.5)" strokeWidth="2"/>
+            </svg>
+          </div>
+          <div style={{position:'absolute',bottom:'8%',left:0,right:0,textAlign:'center',fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:20,color:'rgba(255,195,115,.82)',textShadow:'0 2px 12px rgba(0,0,0,.85)'}}>
+            El Campeón — the Champion of the Casablanca docks
+          </div>
+        </div>
+      )}
+
+      {/* MEMORY 1 — Lions on the beach */}
+      {sub===1 && (
+        <div style={{position:'absolute',inset:0,opacity:subFi}}>
+          <div style={{position:'absolute',inset:0,background:'linear-gradient(180deg,oklch(38% 0.22 42deg) 0%,oklch(52% 0.28 52deg) 32%,oklch(44% 0.22 46deg) 54%,oklch(30% 0.12 46deg) 100%)'}}/>
+          {/* Sunset disk */}
+          <div style={{position:'absolute',left:'50%',top:'20%',width:105,height:105,marginLeft:-52,borderRadius:'50%',background:'radial-gradient(circle,oklch(94% 0.2 62deg) 0%,oklch(80% 0.28 52deg) 55%,oklch(64% 0.22 46deg) 100%)',filter:'blur(4px)',opacity:.92}}/>
+          {/* Sun rays */}
+          {Array.from({length:8},(_,i)=>(
+            <div key={i} style={{
+              position:'absolute',left:'50%',top:'20%',
+              width:2,height:`${18+i*3}%`,marginLeft:-1,
+              background:'linear-gradient(180deg,rgba(255,195,60,.18) 0%,transparent 100%)',
+              transformOrigin:'50% 0%',transform:`rotate(${i*45}deg)`,
+              filter:'blur(3px)'
+            }}/>
+          ))}
+          {/* Sand */}
+          <div style={{position:'absolute',bottom:0,left:0,right:0,height:'28%',background:'linear-gradient(180deg,oklch(54% 0.12 62deg) 0%,oklch(48% 0.1 58deg) 100%)'}}/>
+          {/* Lion silhouettes */}
+          <svg style={{position:'absolute',bottom:'20%',left:0,right:0}} width="1280" height="190" viewBox="0 0 1280 190">
+            {/* Lion 1 — large, bounding */}
+            <g transform={`translate(${390+Math.sin(subT*2.1)*38}, ${88+Math.cos(subT*2.1)*14}) scale(1.2)`}>
+              <ellipse cx="0" cy="22" rx="56" ry="30" fill="oklch(22% 0.07 40deg)"/>
+              <ellipse cx="0" cy="-5" rx="32" ry="30" fill="oklch(18% 0.055 36deg)"/>
+              <circle cx="0" cy="-5" r="20" fill="oklch(22% 0.07 40deg)"/>
+              <path d="M56 22 Q84 8 90 26 Q84 32 64 26" fill="oklch(20% 0.065 38deg)"/>
+              {[-32,-12,8,28].map((x,i)=><rect key={i} x={x} y={44} width={11} height={22} rx={4} fill="oklch(20% 0.065 38deg)"/>)}
+            </g>
+            {/* Lion 2 — smaller, playing */}
+            <g transform={`translate(${720+Math.cos(subT*1.7)*28}, ${100+Math.sin(subT*1.7)*10}) scale(0.88)`}>
+              <ellipse cx="0" cy="20" rx="44" ry="24" fill="oklch(20% 0.065 38deg)"/>
+              <ellipse cx="0" cy="-4" rx="26" ry="24" fill="oklch(16% 0.05 34deg)"/>
+              <circle cx="0" cy="-4" r="16" fill="oklch(20% 0.065 38deg)"/>
+              <path d="M44 20 Q68 8 72 24 Q66 28 50 24" fill="oklch(18% 0.055 36deg)"/>
+              {[-26,-10,6,20].map((x,i)=><rect key={i} x={x} y={38} width={10} height={18} rx={3.5} fill="oklch(18% 0.055 36deg)"/>)}
+            </g>
+          </svg>
+          <div style={{position:'absolute',bottom:'8%',left:0,right:0,textAlign:'center',fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:20,color:'rgba(255,208,125,.9)',textShadow:'0 2px 10px rgba(0,0,0,.7)'}}>
+            He always dreamed of lions. Young. Powerful. Playing on the beach.
+          </div>
+        </div>
+      )}
+      {/* Warm vignette */}
+      <div style={{position:'absolute',inset:0,background:'radial-gradient(ellipse at 50% 50%,transparent 48%,rgba(0,0,0,.72) 100%)',pointerEvents:'none'}}/>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 7 — Return to Harbor (51–58s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene7() {
+  const t = useTime(); const lt = t-51;
+  const fi = fade(lt,2,4.5,1.5);
+  const dawnP = inv(lt,0,7);
+  const zoomS = 1 + dawnP*0.14;
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      {/* Pre-dawn sky → early rose */}
+      <div style={{position:'absolute',inset:0,background:`linear-gradient(180deg,oklch(${lerp(6,14,dawnP)}% 0.03 ${lerp(280,258,dawnP)}deg) 0%,oklch(${lerp(14,28,dawnP)}% ${lerp(0.06,0.1,dawnP)} ${lerp(262,48,dawnP)}deg) 40%,oklch(${lerp(22,42,dawnP)}% ${lerp(0.08,0.16,dawnP)} ${lerp(58,55,dawnP)}deg) 75%,oklch(${lerp(28,38,dawnP)}% 0.14 55deg) 100%)`}}/>
+      {/* Horizon blush */}
+      <div style={{position:'absolute',top:'48%',left:'8%',right:'8%',height:'8%',background:`radial-gradient(ellipse at 50% 100%,oklch(${lerp(50,70,dawnP)}% 0.2 60deg) 0%,transparent 70%)`,opacity:dawnP*0.55,filter:'blur(18px)'}}/>
+      {/* Harbor skyline */}
+      <svg style={{position:'absolute',bottom:'42%',left:0,right:0}} width="1280" height="100" viewBox="0 0 1280 100" preserveAspectRatio="none">
+        <path d="M0 100 L0 60 L80 60 L80 48 L110 48 L110 35 L125 35 L125 22 L132 8 L139 22 L139 35 L155 35 L155 48 L190 48 L190 58 L260 58 L260 50 L290 50 L290 42 L310 42 L310 58 L380 58 L380 65 L520 65 L580 62 L650 58 L760 58 L840 62 L920 62 L1000 58 L1100 62 L1200 58 L1280 62 L1280 100 Z" fill="oklch(8% 0.02 260deg)"/>
+        <ellipse cx="132" cy="7" rx="8" ry="5" fill="oklch(7% 0.015 260deg)"/>
+        <rect x="130" y="-5" width="4" height="12" fill="oklch(7% 0.015 260deg)"/>
+      </svg>
+      {/* Still sea */}
+      <div style={{position:'absolute',bottom:0,left:0,right:0,height:'44%',background:`linear-gradient(180deg,oklch(${lerp(12,22,dawnP)}% 0.06 ${lerp(228,215,dawnP)}deg) 0%,oklch(${lerp(8,14,dawnP)}% 0.04 235deg) 100%)`}}/>
+      <WaveLayer y={445} color={`rgba(${lerp(8,20,dawnP)},${lerp(18,40,dawnP)},${lerp(55,80,dawnP)},0.3)`} amp={0.35} spd={0.35}/>
+      {/* Skiff with skeletal marlin */}
+      <div style={{position:'absolute',bottom:'18%',left:'8%',transformOrigin:'center bottom',transform:`scale(${zoomS})`}}>
+        <svg width="700" height="220" viewBox="0 0 700 220">
+          {/* Hull */}
+          <path d="M25 145 Q42 170 350 174 Q658 170 675 145 Z" fill="oklch(13% 0.025 35deg)"/>
+          <path d="M25 145 L675 145" stroke="oklch(20% 0.035 33deg)" strokeWidth="3"/>
+          {/* Marlin skeleton lashed alongside */}
+          <g transform="translate(18,92)">
+            <path d="M0 32 Q230 24 610 36" stroke="oklch(52% 0.04 52deg)" strokeWidth="4.5" fill="none"/>
+            {Array.from({length:16},(_,i)=>{
+              const x=22+i*37, baseY=28+Math.sin(i*.55)*3;
+              const rl=14+Math.sin(i*.8)*7;
+              return <line key={i} x1={x} y1={baseY-rl} x2={x} y2={baseY+rl} stroke="oklch(46% 0.04 50deg)" strokeWidth="2" opacity=".82"/>;
+            })}
+            <path d="M610 36 L652 34 L652 38 Z" fill="oklch(48% 0.04 50deg)"/>
+            <path d="M0 32 L-28 10 L-4 29 L-28 54 L0 32 Z" fill="oklch(46% 0.04 50deg)"/>
+            {/* Lashing ropes */}
+            {[80,200,340,480].map(x=>(
+              <line key={x} x1={x} y1={10} x2={x+8} y2={52} stroke="rgba(155,130,75,.4)" strokeWidth="1.5"/>
+            ))}
+          </g>
+          {/* Santiago sleeping — stern */}
+          <g transform="translate(500,108)">
+            <path d="M-70 34 Q-45 18 5 20 Q55 22 75 30 Q70 46 5 44 Q-45 42-70 34 Z" fill="oklch(16% 0.035 34deg)"/>
+            <circle cx="-65" cy="32" r="12.5" fill="oklch(20% 0.04 36deg)"/>
+            {/* Hands showing scars */}
+            <path d="M30 32 Q58 26 70 33 Q66 42 50 42 Q32 42 30 32 Z" fill="oklch(30% 0.08 34deg)"/>
+            <line x1="36" y1="34" x2="58" y2="32" stroke="rgba(195,145,95,.38)" strokeWidth="1.5"/>
+            <line x1="38" y1="38" x2="60" y2="36" stroke="rgba(195,145,95,.28)" strokeWidth="1.2"/>
+          </g>
+        </svg>
+      </div>
+      <div style={{position:'absolute',bottom:'6%',left:0,right:0,textAlign:'center',opacity:clamp(inv(lt,2.5,4),0,1)*clamp(1-inv(lt,6,7),0,1)}}>
+        <div style={{fontFamily:'Georgia,serif',fontStyle:'italic',fontSize:22,color:'rgba(255,225,185,.85)',letterSpacing:'.06em',textShadow:'0 2px 16px rgba(0,0,0,.85)'}}>
+          He came home. The battle was over. The great fish lay stripped and bare.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// SCENE 8 — The Quote (58–60s)
+// ════════════════════════════════════════════════════════════════════════════
+function Scene8() {
+  const t = useTime(); const lt = t-58;
+  const fi = clamp(lt/1.2,0,1);
+  const textO = clamp((lt-0.4)/1.6,0,1);
+  const authorO = clamp((lt-1.5)/0.9,0,1);
+  const lineO = clamp((lt-1.8)/0.8,0,1);
+
+  return (
+    <div style={{position:'absolute',inset:0,opacity:fi}}>
+      <div style={{position:'absolute',inset:0,background:'linear-gradient(140deg,oklch(5% 0.018 252deg) 0%,oklch(8% 0.02 242deg) 100%)'}}/>
+      {/* Subtle warm center glow */}
+      <div style={{position:'absolute',left:'50%',top:'50%',width:600,height:300,marginLeft:-300,marginTop:-150,background:'radial-gradient(ellipse at 50% 50%,rgba(100,72,28,.12) 0%,transparent 65%)',filter:'blur(30px)'}}/>
+      {/* Quote */}
+      <div style={{position:'absolute',top:'50%',left:'50%',transform:'translate(-50%,-50%)',textAlign:'center',opacity:textO,width:'78%'}}>
+        <div style={{fontFamily:'Georgia,"Times New Roman",serif',fontSize:58,fontWeight:400,fontStyle:'italic',color:'oklch(88% 0.1 62deg)',letterSpacing:'.025em',lineHeight:1.42,textWrap:'pretty',textShadow:'0 2px 32px rgba(200,148,72,.28)'}}>
+          "A man can be destroyed<br/>but not defeated."
+        </div>
+        <div style={{marginTop:28,fontFamily:'Georgia,serif',fontSize:18,color:'rgba(255,198,122,.45)',letterSpacing:'.32em',opacity:authorO}}>
+          — ERNEST HEMINGWAY
+        </div>
+      </div>
+      {/* Rule */}
+      <div style={{position:'absolute',bottom:'18%',left:'32%',right:'32%',height:1,background:'linear-gradient(90deg,transparent,rgba(200,158,72,.4),transparent)',opacity:lineO}}/>
+    </div>
+  );
+}
+
+// ─── AUDIO CONTROLLER ──────────────────────────────────────────────────────
+function AudioCtrl() {
+  const { time: t, playing } = useTimeline();
+  const prevScene = React.useRef(-1);
+  const prevSharkBeat = React.useRef(-1);
+
+  React.useEffect(()=>{
+    if(!playing) return;
+    AE.init();
+    const scene = t<8?0:t<16?1:t<27?2:t<35?3:t<45?4:t<51?5:t<58?6:7;
+
+    // Continuous levels
+    if(scene<=1) { AE.ocean(scene===0?0.22:0.45); AE.tension(0); }
+    else if(scene===2) { AE.ocean(0.75); AE.tension(0.65); }
+    else if(scene===3) { AE.ocean(0.5); AE.tension(0.28); }
+    else if(scene===4) { AE.ocean(0.88); AE.tension(0.88); }
+    else if(scene===5) { AE.ocean(0.22); AE.tension(0.08); }
+    else if(scene===6) { AE.ocean(0.32); AE.tension(0); }
+    else { AE.ocean(0.1); AE.tension(0); }
+
+    if(scene!==prevScene.current) {
+      if(scene===2) AE.impact();
+      if(scene===4) AE.impact();
+      if(scene===5) AE.warmChord();
+      if(scene===7) AE.finalChord();
+      prevScene.current = scene;
+    }
+    // Periodic shark hits in scene 4
+    if(scene===4) {
+      const beat = Math.floor((t-35)/2.2);
+      if(beat!==prevSharkBeat.current) { AE.sharkHit(); prevSharkBeat.current=beat; }
+    }
+  },[t,playing]);
+  return null;
+}
+
+// ─── TIMESTAMP LABEL ───────────────────────────────────────────────────────
+function TimestampLabel() {
+  const t = useTime();
+  React.useEffect(()=>{
+    const el = document.querySelector('[data-screen-label]');
+    if(el) {
+      const names=['Dawn & The Book','Santiago Rows Out','The Marlin Leaps','Endurance Montage','The Shark Attack','Memories of Youth','Return to Harbor','Final Quote'];
+      const scene = t<8?0:t<16?1:t<27?2:t<35?3:t<45?4:t<51?5:t<58?6:7;
+      el.setAttribute('data-screen-label',`${Math.floor(t)}s — ${names[scene]}`);
+    }
+  },[Math.floor(t)]);
+  return null;
+}
+
+// ─── APP ───────────────────────────────────────────────────────────────────
+function App() {
+  return (
+    <Stage width={1280} height={720} duration={60} background="#000" persistKey="ots_v1">
+      <div data-screen-label="0s — Dawn & The Book" style={{position:'absolute',inset:0}}>
+        {/* Scenes with overlapping fade windows */}
+        <Sprite start={0} end={9}><Scene1/></Sprite>
+        <Sprite start={7.5} end={17}><Scene2/></Sprite>
+        <Sprite start={15.5} end={28}><Scene3/></Sprite>
+        <Sprite start={26.5} end={36}><Scene4/></Sprite>
+        <Sprite start={34.5} end={46}><Scene5/></Sprite>
+        <Sprite start={44.5} end={52}><Scene6/></Sprite>
+        <Sprite start={50.5} end={59}><Scene7/></Sprite>
+        <Sprite start={57.5} end={60}><Scene8/></Sprite>
+        <Vignette/>
+        <AudioCtrl/>
+        <TimestampLabel/>
+      </div>
+    </Stage>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
+</body>
+</html>
